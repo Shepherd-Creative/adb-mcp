@@ -104,24 +104,19 @@ const placeImage = async (command) => {
                     },
                 },
             },
-            {
-                _obj: "set",
-                _target: [
-                    {
-                        _enum: "ordinal",
-                        _ref: "layer",
-                        _value: "targetEnum",
-                    },
-                ],
-                to: {
-                    _obj: "layer",
-                    name: layerId,
-                },
-            },
         ];
 
         await action.batchPlay(commands, {});
-        await rasterizeLayer(command);
+        // Rasterize the currently active layer (the newly placed smart object)
+        await action.batchPlay([{
+            _obj: "rasterizeLayer",
+            _target: [{ _enum: "ordinal", _ref: "layer", _value: "targetEnum" }]
+        }], {});
+        // Rename the placed layer to something descriptive
+        let placedLayer = app.activeDocument.activeLayers[0];
+        if (placedLayer) {
+            placedLayer.name = options.layerName || `Placed Image`;
+        }
     });
 };
 
@@ -341,9 +336,12 @@ const generateImage = async (command) => {
         let o = await action.batchPlay(commands, {});
         let layerId = o[0].layerID;
 
-        //let l = findLayerByName(options.prompt);
-        let l = findLayer(layerId);
-        l.name = options.layerName;
+        if (layerId) {
+            let l = findLayer(layerId);
+            if (l) {
+                l.name = options.layerName;
+            }
+        }
     });
 };
 
@@ -443,15 +441,26 @@ const generativeFill = async (command) => {
         let o = await action.batchPlay(commands, {});
         let id = o[0].layerID;
 
-        //let l = findLayerByName(options.prompt);
+        if (!id) {
+            throw new Error(`generativeFill : Firefly did not return a layer. Response: ${JSON.stringify(o[0])}`);
+        }
+
         let l = findLayer(id);
-        l.name = options.layerName;
+        if (l) {
+            l.name = options.layerName;
+        } else {
+            throw new Error(`generativeFill : Generated layer ID ${id} not found in document.`);
+        }
     });
 };
 
 const saveDocument = async (command) => {
+    let doc = app.activeDocument;
+    if (!doc.path || doc.path.length === 0) {
+        throw new Error("saveDocument : Document has no save path. Use save_document_as to specify a file path first.");
+    }
     await execute(async () => {
-        await app.activeDocument.save();
+        await action.batchPlay([{ _obj: "save" }], {});
     });
 };
 

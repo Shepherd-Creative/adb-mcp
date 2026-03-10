@@ -18,9 +18,9 @@ def createCommand(action:str, options:dict) -> str:
 
     return command
 
-def sendCommand(command:dict):
+def sendCommand(command:dict, timeout:int=None):
 
-    response = socket_client.send_message_blocking(command)
-    
+    response = socket_client.send_message_blocking(command, timeout=timeout)
+
     logger.log(f"Final response: {response['status']}")
     return response

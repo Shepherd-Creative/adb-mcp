@@ -830,6 +830,8 @@ const harmonizeLayer = async (command) => {
     await execute(async () => {
         selectLayer(layer, true);
 
+        let doc = app.activeDocument;
+
         let commands = [
             {
                 "_obj": "syntheticGenHarmonize",
@@ -840,8 +842,8 @@ const harmonizeLayer = async (command) => {
                         "_value": "targetEnum"
                     }
                 ],
-                "documentID": 60,
-                "layerID": 7,
+                "documentID": doc.id,
+                "layerID": layerId,
                 "prompt": "",
                 "serviceID": "gen_harmonize",
                 "serviceOptionsList": {
@@ -885,8 +887,6 @@ const harmonizeLayer = async (command) => {
 
         ];
 
-
-        console.log(rasterizeLayer)
         if(rasterizeLayer) {
             commands.push({
                 _obj: "rasterizeLayer",
@@ -901,10 +901,14 @@ const harmonizeLayer = async (command) => {
         }
 
         let o = await action.batchPlay(commands, {});
-        let layerId = o[0].layerID;
+        let resultLayerId = o[0].layerID;
 
-        let l = findLayer(layerId);
-        l.name = newLayerName;
+        if (resultLayerId) {
+            let l = findLayer(resultLayerId);
+            if (l) {
+                l.name = newLayerName;
+            }
+        }
     });
 };
 

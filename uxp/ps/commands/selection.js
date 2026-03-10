@@ -9,12 +9,13 @@ const {
 const {hasActiveSelection} = require("./utils")
 
 const clearSelection = async () => {
-    await app.activeDocument.selection.selectRectangle(
-        { top: 0, left: 0, bottom: 0, right: 0 },
-        constants.SelectionType.REPLACE,
-        0,
-        true
-    );
+    await execute(async () => {
+        await action.batchPlay([{
+            _obj: "set",
+            _target: [{ _ref: "channel", _property: "selection" }],
+            to: { _enum: "ordinal", _value: "none" }
+        }], {});
+    });
 };
 
 const createMaskFromSelection = async (command) => {

@@ -213,7 +213,8 @@ def save_document_as(file_path: str, file_type: str = "PSD"):
 
 @mcp.tool()
 def save_document():
-    """Saves the current Photoshop Document
+    """Saves the current Photoshop document silently. Only works if the document has been previously saved
+    (has a file path). For new/unsaved documents, use save_document_as first to establish a save path.
     """
     
     command = createCommand("saveDocument", {
@@ -304,34 +305,27 @@ def save_document_image_as_png(file_path: str):
     """
     command = createCommand("getDocumentImage", {})
     response = sendCommand(command)
-    
-    if response.get('format') == 'raw' and 'rawDataBase64' in response:
+
+    # Response from proxy is wrapped: { status: "SUCCESS", response: { base64Image: ..., ... } }
+    image_data = response.get('response', response) if isinstance(response, dict) else response
+
+    if isinstance(image_data, dict) and 'base64Image' in image_data:
         try:
-            # Decode raw data
-            raw_bytes = base64.b64decode(response['rawDataBase64'])
-            
-            # Extract metadata
-            width = response['width']
-            height = response['height']
-            components = response['components']
-            
-            # Convert to numpy array and reshape
-            pixel_array = np.frombuffer(raw_bytes, dtype=np.uint8)
-            image_array = pixel_array.reshape((height, width, components))
-            
-            # Create and save PNG
-            mode = 'RGBA' if components == 4 else 'RGB'
-            image = Image.fromarray(image_array, mode)
+            import io
+            from PIL import Image as PILImage
+
+            raw_bytes = base64.b64decode(image_data['base64Image'])
+            image = PILImage.open(io.BytesIO(raw_bytes))
             image.save(file_path, 'PNG')
-            
+
             return {
                 'status': 'success',
                 'file_path': file_path,
-                'width': width,
-                'height': height,
+                'width': image_data.get('width'),
+                'height': image_data.get('height'),
                 'size_bytes': os.path.getsize(file_path)
             }
-            
+
         except Exception as e:
             return {
                 'status': 'error',
@@ -340,7 +334,7 @@ def save_document_image_as_png(file_path: str):
     else:
         return {
             'status': 'error',
-            'error': 'No raw image data received'
+            'error': f'No image data received in response. Keys: {list(response.keys()) if isinstance(response, dict) else type(response)}'
         }
 
 @mcp.tool()
@@ -365,29 +359,34 @@ def get_layers() -> list:
 @mcp.tool()
 def place_image(
     layer_id: int,
-    image_path: str
+    image_path: str,
+    layer_name: str = "Placed Image"
 ):
-    """Places the image at the specified path on the existing pixel layer with the specified id.
+    """Places the image at the specified path on an existing pixel layer. The image is placed as a smart
+    object, automatically rasterized, and renamed. Create a pixel layer first with create_pixel_layer if needed.
 
-    The image will be placed on the center of the layer, and will fill the layer without changing its aspect ration (thus there may be bars at the top or bottom) 
+    The image will be placed on the center of the layer, and will fill the layer without changing its aspect ratio.
 
     Args:
         layer_id (int): The id of the layer where the image will be placed.
         image_path (str): The file path to the image that will be placed on the layer.
+        layer_name (str): Name for the placed image layer. Defaults to "Placed Image".
     """
-    
+
     command = createCommand("placeImage", {
         "layerId":layer_id,
-        "imagePath":image_path
+        "imagePath":image_path,
+        "layerName":layer_name
     })
 
     return sendCommand(command)
 
 @mcp.tool()
 def harmonize_layer(layer_id:int,  new_layer_name:str, rasterize_layer:bool = True):
-    """Harmonizes (matches lighting and other settings) the selected layer with the background layers.
+    """Harmonizes (matches lighting and color) of the selected layer with the background layers using Adobe Firefly AI.
 
-    The layer being harmonized should be rasterized and have some transparency.
+    IMPORTANT: The target layer MUST have transparency (not edge-to-edge content). Rasterize smart objects first.
+    This is a cloud AI operation — may take up to 120s. Transient failures are possible; retry once if it fails.
 
     Args:
         layer_id (int): ID of the layer to be harmonizes.
@@ -403,7 +402,7 @@ def harmonize_layer(layer_id:int,  new_layer_name:str, rasterize_layer:bool = Tr
         "rasterizeLayer":rasterize_layer
     })
 
-    return sendCommand(command)
+    return sendCommand(command, timeout=120)
 
 
 @mcp.tool()
@@ -548,7 +547,7 @@ def generate_image(
     """Uses Adobe Firefly Generative AI to generate an image on a new layer with the specified layer name.
 
     If there is an active selection, it will use that region for the generation. Otherwise it will generate
-    on the entire layer.
+    on the entire canvas. This is a cloud AI operation — may take up to 120s. Transient failures possible; retry once.
 
     Args:
         layer_name (str): Name for the layer that will be created and contain the generated image
@@ -562,7 +561,7 @@ def generate_image(
         "contentType":content_type
     })
 
-    return sendCommand(command)
+    return sendCommand(command, timeout=120)
 
 @mcp.tool()
 def generative_fill(
@@ -573,15 +572,16 @@ def generative_fill(
 ):
     """Uses Adobe Firefly Generative AI to perform generative fill within the current selection.
 
-    This function uses generative fill to seamlessly integrate new content into the existing image.
-    It requires an active selection, and will fill that region taking into account the surrounding 
-    context and layers below. The AI considers the existing content to create a natural, 
-    contextually-aware fill.
+    Requires an active selection. Fills that region taking into account surrounding context and layers below.
+
+    IMPORTANT: The layer_id must reference a visible, opaque layer — not a low-opacity or near-transparent
+    layer. Firefly uses this layer for context. Prefer a prominent layer near the top of the stack.
+    This is a cloud AI operation — may take up to 180s. Transient failures are possible; retry once if it fails.
 
     Args:
         layer_name (str): Name for the layer that will be created and contain the generated fill
         prompt (str): Prompt describing the content to be generated within the selection
-        layer_id (int): ID of the layer to work with (though a new layer is created for the result)
+        layer_id (int): ID of a visible, opaque layer to provide context (a new layer is created for the result)
         content_type (str): The type of image to be generated. Options include "photo", "art" or "none" (default)
     
     Returns:
@@ -595,7 +595,7 @@ def generative_fill(
         "contentType":content_type,
     })
 
-    return sendCommand(command)
+    return sendCommand(command, timeout=180)
 
 
 @mcp.tool()
@@ -1142,11 +1142,7 @@ def clear_selection():
     
     """Clears / deselects the current selection"""
 
-    command = createCommand("selectRectangle", {
-        "feather":0,
-        "antiAlias":True,
-        "bounds":{"top": 0, "left": 0, "bottom": 0, "right": 0}
-    })
+    command = createCommand("clearSelection", {})
 
     return sendCommand(command)
 
@@ -1237,9 +1233,12 @@ def align_content(
     """
     Aligns content on layer with the specified ID to the current selection.
 
+    Requires an active selection as the alignment reference. To center on canvas, first select the
+    entire canvas with select_rectangle, then call this tool.
+
     Args:
         layer_id (int): The ID of the layer in which to align the content
-        alignment_mode (str): How the content should be aligned. Available options via alignment_modes
+        alignment_mode (str): How the content should be aligned. Valid values: LEFT, CENTER_HORIZONTAL, RIGHT, TOP, CENTER_VERTICAL, BOTTOM
     """
 
     command = createCommand("alignContent", {

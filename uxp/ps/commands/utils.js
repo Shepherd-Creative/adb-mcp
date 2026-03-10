@@ -56,7 +56,8 @@ const parseColor = (color) => {
 };
 
 const getAlignmentMode = (mode) => {
-    switch (mode) {
+    const m = (mode || "").toUpperCase();
+    switch (m) {
         case "LEFT":
             return "ADSLefts";
         case "CENTER_HORIZONTAL":
@@ -71,7 +72,7 @@ const getAlignmentMode = (mode) => {
             return "ADSBottoms";
         default:
             throw new Error(
-                `getAlignmentMode : Unknown alignment mode : ${mode}`
+                `getAlignmentMode : Unknown alignment mode : ${mode}. Valid values: LEFT, CENTER_HORIZONTAL, RIGHT, TOP, CENTER_VERTICAL, BOTTOM`
             );
     }
 };
@@ -205,7 +206,7 @@ const _saveDocumentAs = async (filePath, fileType) => {
                 layers:true,
                 maximizeCompatibility:true,
                 spotColor:true,
-            }, true)
+            }, false)
         }
 
         return {savedFilePath:saveFile.nativePath}
