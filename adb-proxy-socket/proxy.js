@@ -33,7 +33,7 @@ const io = new Server(server, {
     maxHttpBufferSize: 50 * 1024 * 1024,
 });
 
-const PORT = 3001;
+const PORT = 3002;
 // Track clients by application
 const applicationClients = {};
 

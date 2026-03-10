@@ -42,7 +42,7 @@ mcp = FastMCP(mcp_name, log_level="ERROR")
 print(f"{mcp_name} running on stdio", file=sys.stderr)
 
 APPLICATION = "photoshop"
-PROXY_URL = 'http://localhost:3001'
+PROXY_URL = 'http://localhost:3002'
 PROXY_TIMEOUT = 20
 
 socket_client.configure(
@@ -1641,3 +1641,6 @@ blend_modes = [
     "SUBTRACT",
     "VIVIDLIGHT"
 ]
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")
