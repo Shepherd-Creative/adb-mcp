@@ -67,7 +67,7 @@ const checkRequiresActiveDocument = (command) => {
 };
 
 const requiresActiveDocument = (command) => {
-    return !["createDocument", "openFile"].includes(command.action);
+    return !["createDocument", "openFile", "playActions", "undoToHistoryState"].includes(command.action);
 };
 
 const commandHandlers = {

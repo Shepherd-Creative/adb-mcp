@@ -539,7 +539,161 @@ const executeBatchPlayCommand = async (commands) => {
     return out;
 }
 
+const playActions = async (command) => {
+    let options = command.options;
+    let actions = options.actions;
+    let applyToAll = options.applyToAll || false;
+
+    if (!actions || !actions.length) {
+        throw new Error("playActions : actions list cannot be empty");
+    }
+
+    const runOnActiveDoc = async () => {
+        let results = [];
+        for (let a of actions) {
+            let playDescriptor = {
+                _obj: "play",
+                _target: [
+                    { _ref: "action", _name: a.actionName },
+                    { _ref: "actionSet", _name: a.actionSetName }
+                ],
+                _options: { dialogOptions: "dontDisplay" }
+            };
+
+            await execute(async () => {
+                await action.batchPlay([playDescriptor], {});
+            }, `Playing action: ${a.actionName}`);
+
+            results.push({ action: a.actionName, status: "ok" });
+        }
+        return results;
+    };
+
+    if (!applyToAll) {
+        return await runOnActiveDoc();
+    }
+
+    let docs = listOpenDocuments();
+    let allResults = [];
+
+    for (let i = 0; i < docs.length; i++) {
+        let doc = docs[i];
+        let docName = doc.name;
+        try {
+            await execute(async () => {
+                app.activeDocument = doc;
+            }, `Switching to: ${docName}`);
+
+            let docResults = await runOnActiveDoc();
+            allResults.push({ document: docName, status: "ok", actions: docResults });
+        } catch (e) {
+            allResults.push({ document: docName, status: "failed", error: e.message });
+        }
+    }
+
+    return allResults;
+};
+
+const getHistoryStates = async (command) => {
+    return await execute(async () => {
+        let doc = app.activeDocument;
+        let historyStates = doc.historyStates;
+        let currentState = doc.activeHistoryState;
+
+        let states = [];
+        for (let i = 0; i < historyStates.length; i++) {
+            let state = historyStates[i];
+            states.push({
+                index: i + 1,
+                name: state.name,
+                isCurrent: state.name === currentState.name && i === historyStates.length - 1
+            });
+        }
+
+        // Find actual current state index
+        let currentIndex = states.length;
+        for (let i = states.length - 1; i >= 0; i--) {
+            if (historyStates[i] === currentState) {
+                currentIndex = i + 1;
+                states[i].isCurrent = true;
+                break;
+            }
+        }
+
+        return {
+            documentName: doc.name,
+            currentStateIndex: currentIndex,
+            totalStates: states.length,
+            states: states
+        };
+    }, "Get History States");
+};
+
+const undoToHistoryState = async (command) => {
+    let options = command.options;
+    let targetStateName = options.stateName;
+    let applyToAll = options.applyToAll || false;
+
+    const revertOnActiveDoc = async () => {
+        return await execute(async () => {
+            let doc = app.activeDocument;
+            let historyStates = doc.historyStates;
+
+            // Find the LAST occurrence of the target state name
+            let targetState = null;
+            let targetIndex = -1;
+            for (let i = historyStates.length - 1; i >= 0; i--) {
+                if (historyStates[i].name === targetStateName) {
+                    targetState = historyStates[i];
+                    targetIndex = i + 1;
+                    break;
+                }
+            }
+
+            if (!targetState) {
+                throw new Error(`History state "${targetStateName}" not found in ${doc.name}`);
+            }
+
+            // Set the active history state
+            doc.activeHistoryState = targetState;
+
+            return {
+                documentName: doc.name,
+                revertedTo: targetStateName,
+                stateIndex: targetIndex
+            };
+        }, `Revert to: ${targetStateName}`);
+    };
+
+    if (!applyToAll) {
+        return await revertOnActiveDoc();
+    }
+
+    let docs = listOpenDocuments();
+    let allResults = [];
+
+    for (let i = 0; i < docs.length; i++) {
+        let doc = docs[i];
+        let docName = doc.name;
+        try {
+            await execute(async () => {
+                app.activeDocument = doc;
+            }, `Switching to: ${docName}`);
+
+            let result = await revertOnActiveDoc();
+            allResults.push({ document: docName, status: "ok", revertedTo: result.revertedTo, stateIndex: result.stateIndex });
+        } catch (e) {
+            allResults.push({ document: docName, status: "failed", error: e.message });
+        }
+    }
+
+    return allResults;
+};
+
 const commandHandlers = {
+    getHistoryStates,
+    undoToHistoryState,
+    playActions,
     generativeFill,
     executeBatchPlayCommand,
     setActiveDocument,

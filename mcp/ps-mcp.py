@@ -54,6 +54,93 @@ socket_client.configure(
 init(APPLICATION, socket_client)
 
 @mcp.tool()
+def get_history_states():
+    """
+    Returns the list of history states for the currently active Photoshop document.
+
+    Use this to inspect the undo history before reverting. Each state has an index,
+    name, and whether it's the current state.
+
+    Returns:
+        dict: Contains documentName, currentStateIndex, totalStates, and a list of
+            states with index, name, and isCurrent fields.
+    """
+
+    command = createCommand("getHistoryStates", {})
+    return sendCommand(command)
+
+
+@mcp.tool()
+def undo_to_history_state(state_name: str, apply_to_all: bool = False):
+    """
+    Reverts the document to a specific history state by name.
+
+    Searches the history for the last occurrence of the given state name and
+    jumps to it. Use get_history_states first to see available state names.
+
+    Args:
+        state_name (str): The exact name of the history state to revert to
+            (e.g. "Image Size", "Open", "Place Linked Smart Object").
+        apply_to_all (bool): If True, reverts ALL open documents to the named state.
+            If False, reverts only the active document. Defaults to False.
+
+    Returns:
+        dict: Results for each document processed.
+    """
+
+    if not state_name:
+        raise ValueError("state_name cannot be empty.")
+
+    command = createCommand("undoToHistoryState", {
+        "stateName": state_name,
+        "applyToAll": apply_to_all
+    })
+
+    timeout = 600 if apply_to_all else 60
+    return sendCommand(command, timeout=timeout)
+
+
+@mcp.tool()
+def play_actions(actions: list[dict], apply_to_all: bool = False):
+    """
+    Runs one or more Photoshop Actions from the Actions palette in sequence.
+
+    Use this to execute saved Actions by name. When apply_to_all is True, the action
+    sequence runs on every open document. When False, runs only on the active document.
+
+    Args:
+        actions (list[dict]): Ordered list of actions to run. Each dict must have:
+            - "actionName" (str): The exact name of the Action (e.g. "1400x2000px")
+            - "actionSetName" (str): The Action Set/folder name (e.g. "Default Actions")
+        apply_to_all (bool): If True, runs the action sequence on ALL open documents.
+            If False, runs only on the currently active document. Defaults to False.
+
+    Returns:
+        dict: Results for each document/action processed.
+
+    Example:
+        >>> play_actions(
+        ...     actions=[
+        ...         {"actionName": "1400x2000px", "actionSetName": "Default Actions"},
+        ...         {"actionName": "Place ET Logo (1400x2000px)", "actionSetName": "Default Actions"}
+        ...     ],
+        ...     apply_to_all=True
+        ... )
+    """
+
+    if not actions:
+        raise ValueError("actions list cannot be empty.")
+
+    command = createCommand("playActions", {
+        "actions": actions,
+        "applyToAll": apply_to_all
+    })
+
+    timeout = 600 if apply_to_all else 60
+    return sendCommand(command, timeout=timeout)
+
+
+@mcp.tool()
 def set_active_document(document_id:int):
     """
     Sets the document with the specified ID to the active document in Photoshop
@@ -1134,6 +1221,119 @@ def invert_selection():
     """Inverts the current selection in the Photoshop document"""
 
     command = createCommand("invertSelection", {})
+    return sendCommand(command)
+
+
+@mcp.tool()
+def expand_selection(pixels: int = 10):
+    """Expands the current selection outward by the specified number of pixels.
+
+    Requires an active selection. Grows the selection boundary uniformly in all
+    directions. Useful for creating overlap between layers or extending a
+    transparency selection before generative fill.
+
+    Args:
+        pixels (int): Number of pixels to expand the selection by (default: 10)
+
+    Returns:
+        dict: Updated selectionBounds after expansion.
+    """
+
+    command = createCommand("expandSelection", {"pixels": pixels})
+    return sendCommand(command)
+
+
+@mcp.tool()
+def contract_selection(pixels: int = 10):
+    """Contracts the current selection inward by the specified number of pixels.
+
+    Requires an active selection. Shrinks the selection boundary uniformly in all
+    directions. If contracted too far, the selection may disappear entirely.
+
+    Args:
+        pixels (int): Number of pixels to contract the selection by (default: 10)
+
+    Returns:
+        dict: Updated selectionBounds after contraction, or message if selection vanished.
+    """
+
+    command = createCommand("contractSelection", {"pixels": pixels})
+    return sendCommand(command)
+
+
+@mcp.tool()
+def stamp_visible(layer_name: str = "Stamped Visible"):
+    """Stamps (flattens) all currently visible layers into a single new layer.
+
+    Non-destructive — original layers are untouched. The new layer is placed at
+    the top of the stack and becomes the active layer. Control which layers
+    contribute by toggling visibility with set_layer_visibility beforehand.
+
+    Common uses:
+    - Create a composite snapshot for transparency analysis
+    - Flatten visible background layers for generative fill context
+    - Export a merged preview without destroying layer structure
+
+    WARNING: Do NOT use flatten_all_layers or mergeVisible for this purpose —
+    they destroy layer structure. This tool is always safe.
+
+    Args:
+        layer_name (str): Name for the new stamped layer (default: "Stamped Visible")
+
+    Returns:
+        dict: layerId (int) and layerName (str) of the new layer.
+    """
+
+    command = createCommand("stampVisible", {"layerName": layer_name})
+    return sendCommand(command)
+
+
+@mcp.tool()
+def select_layer_transparency(layer_id: int, invert: bool = True):
+    """Loads a single layer's transparency channel as a selection.
+
+    By default (invert=True), selects the TRANSPARENT areas of the layer.
+    With invert=False, selects the OPAQUE areas instead.
+
+    Works on any layer — a regular layer, a smart object, or a stamped
+    composite from stamp_visible. Does NOT modify or delete the layer.
+
+    Args:
+        layer_id (int): ID of the layer to load transparency from
+        invert (bool): If True (default), selects transparent areas.
+                       If False, selects opaque areas.
+
+    Returns:
+        dict: hasTransparency (bool), hasSelection (bool), selectionBounds if applicable.
+    """
+
+    command = createCommand("selectLayerTransparency", {
+        "layerId": layer_id,
+        "invert": invert
+    })
+    return sendCommand(command)
+
+
+@mcp.tool()
+def select_composite_transparency():
+    """Selects transparent areas across all currently visible layers combined.
+
+    Convenience tool that chains stamp_visible + select_layer_transparency + cleanup
+    into a single atomic call. Stamps all visible layers to a temp layer, loads its
+    transparency as a selection (transparent areas selected), then deletes the temp layer.
+
+    Use this when you need a quick one-shot transparency check and don't need the
+    stamped layer to persist. If you need the stamped layer (e.g., as context for
+    generative_fill), use stamp_visible + select_layer_transparency separately instead.
+
+    Control which layers contribute by toggling visibility with set_layer_visibility
+    before calling this tool.
+
+    Returns:
+        dict: hasTransparency (bool), selectionBounds if transparent areas exist.
+    """
+
+    command = createCommand("selectCompositeTransparency", {})
     return sendCommand(command)
 
 

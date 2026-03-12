@@ -377,6 +377,245 @@ const selectRectangle = async (command) => {
     });
 };
 
+const stampVisible = async (command) => {
+    return await execute(async () => {
+        const doc = app.activeDocument;
+        const options = command.options || {};
+        const layerName = options.layerName || "Stamped Visible";
+
+        // 1. Select the full canvas
+        await doc.selection.selectAll();
+
+        // 2. Copy merged (composites all visible layers)
+        await action.batchPlay([{ _obj: "copyMerged" }], {});
+
+        // 3. Deselect before paste
+        await action.batchPlay([{
+            _obj: "set",
+            _target: [{ _ref: "channel", _property: "selection" }],
+            to: { _enum: "ordinal", _value: "none" }
+        }], {});
+
+        // 4. Paste in place — always creates a NEW layer as the active layer
+        await action.batchPlay([{
+            _obj: "paste",
+            antiAlias: { _enum: "antiAliasType", _value: "antiAliasNone" },
+            as: { _class: "pixel" },
+            inPlace: true
+        }], {});
+
+        // 5. Rename the new layer
+        const newLayer = doc.activeLayers[0];
+        newLayer.name = layerName;
+
+        return {
+            layerId: newLayer.id,
+            layerName: newLayer.name,
+            message: "Stamped all visible layers to a new layer"
+        };
+    });
+};
+
+const selectLayerTransparency = async (command) => {
+    return await execute(async () => {
+        const doc = app.activeDocument;
+        const options = command.options || {};
+        const layerId = options.layerId;
+        const invert = options.invert !== undefined ? options.invert : true;
+
+        // Select the target layer
+        const layer = findLayer(layerId);
+        if (!layer) {
+            throw new Error(`selectLayerTransparency: Could not find layer with ID ${layerId}`);
+        }
+        selectLayer(layer, true);
+
+        // Load the layer's transparency as selection (selects opaque pixels)
+        await action.batchPlay([{
+            _obj: "set",
+            _target: [{ _ref: "channel", _property: "selection" }],
+            to: {
+                _ref: "channel",
+                _enum: "channel",
+                _value: "transparencyEnum"
+            },
+            _options: { dialogOptions: "dontDisplay" }
+        }], {});
+
+        // Check if there's a selection
+        const hasSel = !!doc.selection?.bounds;
+
+        if (!hasSel) {
+            // No opaque pixels at all — layer is fully transparent
+            return {
+                hasTransparency: true,
+                hasSelection: false,
+                message: "Layer is fully transparent — no opaque pixels to select"
+            };
+        }
+
+        if (invert) {
+            // Invert so transparent areas become the selection
+            await action.batchPlay([{ _obj: "inverse" }], {});
+
+            const hasTransparency = !!doc.selection?.bounds;
+            if (!hasTransparency) {
+                return {
+                    hasTransparency: false,
+                    hasSelection: false,
+                    message: "Layer is fully opaque — no transparency"
+                };
+            }
+            const bounds = doc.selection.bounds;
+            return {
+                hasTransparency: true,
+                hasSelection: true,
+                selectionBounds: {
+                    left: bounds.left,
+                    top: bounds.top,
+                    right: bounds.right,
+                    bottom: bounds.bottom
+                }
+            };
+        } else {
+            // Return opaque areas as the selection
+            const bounds = doc.selection.bounds;
+            return {
+                hasTransparency: false,
+                hasSelection: true,
+                selectionBounds: {
+                    left: bounds.left,
+                    top: bounds.top,
+                    right: bounds.right,
+                    bottom: bounds.bottom
+                },
+                message: "Opaque pixels selected"
+            };
+        }
+    });
+};
+
+const selectCompositeTransparency = async (command) => {
+    return await execute(async () => {
+        const doc = app.activeDocument;
+
+        // 1. Stamp visible layers to a temp layer
+        await doc.selection.selectAll();
+        await action.batchPlay([{ _obj: "copyMerged" }], {});
+        await action.batchPlay([{
+            _obj: "set",
+            _target: [{ _ref: "channel", _property: "selection" }],
+            to: { _enum: "ordinal", _value: "none" }
+        }], {});
+        await action.batchPlay([{
+            _obj: "paste",
+            antiAlias: { _enum: "antiAliasType", _value: "antiAliasNone" },
+            as: { _class: "pixel" },
+            inPlace: true
+        }], {});
+
+        // 2. Load temp layer's transparency as selection
+        await action.batchPlay([{
+            _obj: "set",
+            _target: [{ _ref: "channel", _property: "selection" }],
+            to: {
+                _ref: "channel",
+                _enum: "channel",
+                _value: "transparencyEnum"
+            },
+            _options: { dialogOptions: "dontDisplay" }
+        }], {});
+
+        // 3. Delete the temp layer
+        await action.batchPlay([{
+            _obj: "delete",
+            _target: [{ _ref: "layer", _enum: "ordinal", _value: "targetEnum" }]
+        }], {});
+
+        // 4. Check and invert
+        const hasSel = !!doc.selection?.bounds;
+
+        if (hasSel) {
+            await action.batchPlay([{ _obj: "inverse" }], {});
+
+            const hasTransparency = !!doc.selection?.bounds;
+            if (!hasTransparency) {
+                return { hasTransparency: false, message: "Document is fully opaque — no transparency" };
+            }
+            const bounds = doc.selection.bounds;
+            return {
+                hasTransparency: true,
+                selectionBounds: {
+                    left: bounds.left,
+                    top: bounds.top,
+                    right: bounds.right,
+                    bottom: bounds.bottom
+                }
+            };
+        } else {
+            return { hasTransparency: true, message: "Document appears fully transparent" };
+        }
+    });
+};
+
+const expandSelection = async (command) => {
+    const options = command.options || {};
+    const pixels = options.pixels || 10;
+
+    if (!app.activeDocument.selection.bounds) {
+        throw new Error(`expandSelection : Requires an active selection`);
+    }
+
+    return await execute(async () => {
+        await action.batchPlay([{
+            _obj: "expand",
+            by: { _unit: "pixelUnit", _value: pixels },
+            selectionModifyEffectAtCanvasBounds: false
+        }], {});
+
+        const bounds = app.activeDocument.selection.bounds;
+        return {
+            selectionBounds: {
+                left: bounds.left,
+                top: bounds.top,
+                right: bounds.right,
+                bottom: bounds.bottom
+            }
+        };
+    });
+};
+
+const contractSelection = async (command) => {
+    const options = command.options || {};
+    const pixels = options.pixels || 10;
+
+    if (!app.activeDocument.selection.bounds) {
+        throw new Error(`contractSelection : Requires an active selection`);
+    }
+
+    return await execute(async () => {
+        await action.batchPlay([{
+            _obj: "contract",
+            by: { _unit: "pixelUnit", _value: pixels },
+            selectionModifyEffectAtCanvasBounds: false
+        }], {});
+
+        const hasSel = !!app.activeDocument.selection?.bounds;
+        if (!hasSel) {
+            return { message: "Selection contracted to nothing" };
+        }
+        const bounds = app.activeDocument.selection.bounds;
+        return {
+            selectionBounds: {
+                left: bounds.left,
+                top: bounds.top,
+                right: bounds.right,
+                bottom: bounds.bottom
+            }
+        };
+    });
+};
+
 const invertSelection = async (command) => {
 
     if (!app.activeDocument.selection.bounds) {
@@ -407,7 +646,12 @@ const commandHandlers = {
     selectPolygon,
     selectEllipse,
     selectRectangle,
-    invertSelection
+    invertSelection,
+    expandSelection,
+    contractSelection,
+    stampVisible,
+    selectLayerTransparency,
+    selectCompositeTransparency
 };
 
 module.exports = {
