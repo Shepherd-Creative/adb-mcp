@@ -632,6 +632,76 @@ const invertSelection = async (command) => {
     });
 };
 
+const duplicateLayersToDocument = async (command) => {
+    return await execute(async () => {
+        const options = command.options || {};
+        const layerIds = options.layerIds;
+        const targetDocumentId = options.targetDocumentId;
+
+        if (!layerIds || !layerIds.length) {
+            throw new Error("duplicateLayersToDocument: layerIds is required");
+        }
+        if (!targetDocumentId) {
+            throw new Error("duplicateLayersToDocument: targetDocumentId is required");
+        }
+
+        // Build layer references by ID
+        const targetRefs = layerIds.map(id => ({ _ref: "layer", _id: id }));
+
+        await action.batchPlay([{
+            _obj: "duplicate",
+            _target: targetRefs,
+            to: { _ref: "document", _id: targetDocumentId },
+            _options: { dialogOptions: "dontDisplay" }
+        }], {});
+
+        return {
+            message: `Duplicated ${layerIds.length} layer(s) to document ${targetDocumentId}`
+        };
+    });
+};
+
+const linkLayers = async (command) => {
+    return await execute(async () => {
+        const doc = app.activeDocument;
+        const options = command.options || {};
+        const layerIds = options.layerIds;
+
+        if (!layerIds || layerIds.length < 2) {
+            throw new Error("linkLayers: at least 2 layerIds are required");
+        }
+
+        // Select all specified layers
+        const firstLayer = findLayer(layerIds[0]);
+        if (!firstLayer) {
+            throw new Error(`linkLayers: Could not find layer with ID ${layerIds[0]}`);
+        }
+        selectLayer(firstLayer, true);
+
+        // Add remaining layers to selection
+        for (let i = 1; i < layerIds.length; i++) {
+            await action.batchPlay([{
+                _obj: "select",
+                _target: [{ _ref: "layer", _id: layerIds[i] }],
+                selectionModifier: { _enum: "selectionModifierType", _value: "addToSelection" },
+                makeVisible: false,
+                _options: { dialogOptions: "dontDisplay" }
+            }], {});
+        }
+
+        // Link selected layers
+        await action.batchPlay([{
+            _obj: "linkSelectedLayers",
+            _target: [{ _ref: "layer", _enum: "ordinal", _value: "targetEnum" }],
+            _options: { dialogOptions: "dontDisplay" }
+        }], {});
+
+        return {
+            message: `Linked ${layerIds.length} layers`
+        };
+    });
+};
+
 const commandHandlers = {
     clearSelection,
     createMaskFromSelection,
@@ -651,7 +721,9 @@ const commandHandlers = {
     contractSelection,
     stampVisible,
     selectLayerTransparency,
-    selectCompositeTransparency
+    selectCompositeTransparency,
+    duplicateLayersToDocument,
+    linkLayers
 };
 
 module.exports = {

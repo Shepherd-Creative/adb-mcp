@@ -1503,6 +1503,41 @@ def duplicate_layer(layer_to_duplicate_id:int, duplicate_layer_name:str):
     return sendCommand(command)
 
 @mcp.tool()
+def duplicate_layers_to_document(layer_ids: list[int], target_document_id: int) -> list:
+    """
+    Duplicates layers from the current active document to another open document.
+    Use this to copy layer groups (e.g. Guidelines, Logos) between documents.
+    The source document must be the active document. Layers retain their position.
+
+    Args:
+        layer_ids (list[int]): List of layer IDs to duplicate (can include groups).
+        target_document_id (int): The document ID of the destination document.
+    """
+
+    command = createCommand("duplicateLayersToDocument", {
+        "layerIds": layer_ids,
+        "targetDocumentId": target_document_id
+    })
+
+    return sendCommand(command)
+
+@mcp.tool()
+def link_layers(layer_ids: list[int]) -> list:
+    """
+    Links the specified layers together so they move/transform as a unit.
+    Linked layers stay independent (not grouped) but translate and scale together.
+
+    Args:
+        layer_ids (list[int]): List of layer IDs to link (minimum 2).
+    """
+
+    command = createCommand("linkLayers", {
+        "layerIds": layer_ids
+    })
+
+    return sendCommand(command)
+
+@mcp.tool()
 def flatten_all_layers(layer_name:str):
     """
     Flatten all layers in the document into a single layer with specified name
