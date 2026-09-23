@@ -124,6 +124,13 @@ You should see a message like:
 2. Go to **Settings > Plugins** and check **"Enable Developer Mode"**
 3. Restart Photoshop
 
+##### Enable Developer Mode in Premeire Pro
+
+**For Premeire Pro:**
+1. Launch Premeire Pro (2025/26.0 or greater)
+2. Go to **Settings > Plugins** and check **"Enable Developer Mode"**
+3. Restart Premeire Pro
+
 #### AfterEffects, Illustrator (CEP)
 
 ##### Mac

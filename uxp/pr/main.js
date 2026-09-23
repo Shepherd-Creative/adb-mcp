@@ -23,6 +23,7 @@
 
 const { entrypoints } = require("uxp");
 const { io } = require("./socket.io.js");
+const os = require("os");
 
 const { getSequences } = require("./commands/utils.js");
 
@@ -31,6 +32,8 @@ const {
     parseAndRouteCommand,
     checkRequiresActiveProject,
 } = require("./commands/index.js");
+
+const IS_WINDOWS = os.platform() === "win32"; // "darwin" on Mac
 
 const APPLICATION = "premiere";
 const PROXY_URL = "http://localhost:3001";
@@ -54,10 +57,8 @@ const onCommandPacket = async (packet) => {
         out.status = "SUCCESS";
         out.sequences = await getSequences();
         out.project = await getProjectInfo();
-        
     } catch (e) {
-
-        console.log(e)
+        console.log(e);
 
         out.status = "FAILURE";
         out.message = `Error calling ${command.action} : ${e}`;
@@ -69,7 +70,7 @@ const onCommandPacket = async (packet) => {
 function connectToServer() {
     // Create new Socket.IO connection
     socket = io(PROXY_URL, {
-        transports: ["websocket"],
+        transports: IS_WINDOWS ? ["polling"] : ["websocket"],
     });
 
     socket.on("connect", () => {
@@ -163,7 +164,7 @@ document
     .addEventListener("change", function (event) {
         window.localStorage.setItem(
             CONNECT_ON_LAUNCH,
-            JSON.stringify(event.target.checked)
+            JSON.stringify(event.target.checked),
         );
     });
 
