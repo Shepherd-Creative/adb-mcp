@@ -99,7 +99,7 @@ Restart Claude Desktop after installation.
 2. Run `node proxy.js`
 
 You should see a message like:  
-   `Photoshop MCP Command proxy server running on ws://localhost:3001`
+   `Photoshop MCP Command proxy server running on ws://localhost:3002`
 
 **Keep this running** — the proxy server must stay active for Claude to communicate with Adobe plugins.
 
@@ -302,7 +302,7 @@ You can tell the AI to use a specific font, using its postscript name.
 *   Make sure the node / proxy server is running. If you plugin connects you should see output similar to:
 
 ```
-adb-mcp Command proxy server running on ws://localhost:3001
+adb-mcp Command proxy server running on ws://localhost:3002
 User connected: Ud6L4CjMWGAeofYAAAAB
 Client Ud6L4CjMWGAeofYAAAAB registered for application: photoshop
 ```

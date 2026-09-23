@@ -32,7 +32,7 @@ const {
 } = require("./commands/index.js");
 
 const APPLICATION = "indesign";
-const PROXY_URL = "http://localhost:3001";
+const PROXY_URL = "http://localhost:3002";
 
 let socket = null;
 

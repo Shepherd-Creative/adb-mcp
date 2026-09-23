@@ -36,7 +36,7 @@ const {
 const IS_WINDOWS = os.platform() === "win32"; // "darwin" on Mac
 
 const APPLICATION = "premiere";
-const PROXY_URL = "http://localhost:3001";
+const PROXY_URL = "http://localhost:3002";
 
 let socket = null;
 
