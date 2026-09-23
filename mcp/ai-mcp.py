@@ -31,7 +31,7 @@ mcp = FastMCP(mcp_name, log_level="ERROR")
 print(f"{mcp_name} running on stdio", file=sys.stderr)
 
 APPLICATION = "illustrator"
-PROXY_URL = 'http://localhost:3001'
+PROXY_URL = 'http://localhost:3002'
 PROXY_TIMEOUT = 20
 
 socket_client.configure(
@@ -265,3 +265,7 @@ BLEND_MODES = [
     "SUBTRACT",
     "VIVID_LIGHT"
 ]
+
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")

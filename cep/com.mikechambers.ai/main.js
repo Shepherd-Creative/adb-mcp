@@ -4,7 +4,7 @@
 
 const csInterface = new CSInterface();
 const APPLICATION = "illustrator";
-const PROXY_URL = "http://localhost:3001";
+const PROXY_URL = "http://localhost:3002";
 
 
 let socket = null;

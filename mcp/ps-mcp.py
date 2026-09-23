@@ -604,6 +604,24 @@ def delete_layer(
     return sendCommand(command)
 
 
+@mcp.tool()
+def ungroup_layer(
+    layer_id:int
+):
+    """Deletes a layer group but keeps its child layers, promoting them to the parent level.
+
+    Use this to dissolve a group without losing its contents. Only works on group layers.
+
+    Args:
+        layer_id (int): ID of the group layer to ungroup
+    """
+
+    command = createCommand("ungroupLayer", {
+        "layerId":layer_id
+    })
+
+    return sendCommand(command)
+
 
 @mcp.tool()
 def set_layer_visibility(
@@ -857,14 +875,15 @@ def copy_selection_to_clipboard(layer_id: int):
 
 @mcp.tool()
 def select_subject(layer_id: int):
-    """Automatically selects the subject in the specified layer.
+    """Automatically selects the subject in the specified layer using Photoshop's AI detection.
 
-    This function identifies and selects the subject in the given image layer. 
-    It returns an object containing a property named `hasActiveSelection`, 
-    which indicates whether any pixels were selected (e.g., if no subject was detected).
+    This function identifies and selects the subject in the given image layer.
+    Returns the bounding box of the detected subject as `subjectBounds` with
+    `left`, `top`, `right`, `bottom` pixel coordinates, plus `hasActiveSelection`
+    indicating whether any pixels were selected.
 
     Args:
-        layer_int (int): The name of that contains the image to select the subject from.
+        layer_id (int): The ID of the layer that contains the image to select the subject from.
     """
 
     

@@ -81,6 +81,19 @@ const selectSubject = async (command) => {
         ];
 
         await action.batchPlay(commands, {});
+
+        const doc = app.activeDocument;
+        const bounds = doc.selection?.bounds;
+        if (bounds) {
+            return {
+                subjectBounds: {
+                    left: bounds.left,
+                    top: bounds.top,
+                    right: bounds.right,
+                    bottom: bounds.bottom,
+                },
+            };
+        }
     });
 };
 

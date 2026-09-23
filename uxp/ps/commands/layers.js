@@ -208,12 +208,49 @@ const deleteLayer = async (command) => {
 
     if (!layer) {
         throw new Error(
-            `setLayerVisibility : Could not find layer with ID : [${layerId}]`
+            `deleteLayer : Could not find layer with ID : [${layerId}]`
         );
     }
 
     await execute(async () => {
         layer.delete();
+    });
+};
+
+const ungroupLayer = async (command) => {
+    let options = command.options;
+
+    let layerId = options.layerId;
+    let layer = findLayer(layerId);
+
+    if (!layer) {
+        throw new Error(
+            `ungroupLayer : Could not find layer with ID : [${layerId}]`
+        );
+    }
+
+    if (layer.kind.toUpperCase() !== constants.LayerKind.GROUP.toUpperCase()) {
+        throw new Error(
+            `ungroupLayer : Layer [${layerId}] is not a group (kind: ${layer.kind})`
+        );
+    }
+
+    await execute(async () => {
+        // Select the group layer first
+        await action.batchPlay([{
+            _obj: "select",
+            _target: [{ _ref: "layer", _id: layerId }],
+            makeVisible: false,
+            _options: { dialogOptions: "dontDisplay" }
+        }], {});
+
+        // Delete group only, promoting children to parent level
+        await action.batchPlay([{
+            _obj: "delete",
+            _target: [{ _ref: "layer", _enum: "ordinal", _value: "targetEnum" }],
+            deleteContained: false,
+            _options: { dialogOptions: "dontDisplay" }
+        }], {});
     });
 };
 
@@ -308,7 +345,27 @@ const translateLayer = async (command) => {
     }
 
     await execute(async () => {
-        await layer.translate(options.xOffset, options.yOffset);
+        // Select the target layer first
+        await action.batchPlay([{
+            _obj: "select",
+            _target: [{ _ref: "layer", _id: layerId }],
+            makeVisible: false,
+            _isCommand: true
+        }], {});
+
+        // Use native move descriptor (layer.translate() silently fails)
+        await action.batchPlay([{
+            _obj: "move",
+            _target: [
+                { _ref: "layer", _enum: "ordinal", _value: "targetEnum" }
+            ],
+            to: {
+                _obj: "offset",
+                horizontal: { _unit: "pixelsUnit", _value: options.xOffset || 0 },
+                vertical: { _unit: "pixelsUnit", _value: -(options.yOffset || 0) }
+            },
+            _isCommand: true
+        }], {});
     });
 };
 
@@ -967,6 +1024,7 @@ const commandHandlers = {
     rotateLayer,
     flipLayer,
     deleteLayer,
+    ungroupLayer,
     renameLayer,
     groupLayers,
     setLayerVisibility,
