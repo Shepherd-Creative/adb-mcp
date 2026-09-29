@@ -38,6 +38,14 @@ const IS_WINDOWS = os.platform() === "win32"; // "darwin" on Mac
 const APPLICATION = "premiere";
 const PROXY_URL = "http://localhost:3002";
 
+// The proxy's shared secret. The proxy creates this file on its first start.
+// Never log the token itself.
+const TOKEN_PATH = `${os.homedir()}/.config/adb-mcp/token`;
+
+function readProxyToken() {
+    return require("fs").readFileSync(TOKEN_PATH, { encoding: "utf-8" }).trim();
+}
+
 let socket = null;
 
 const onCommandPacket = async (packet) => {
@@ -71,6 +79,15 @@ function connectToServer() {
     // Create new Socket.IO connection
     socket = io(PROXY_URL, {
         transports: IS_WINDOWS ? ["polling"] : ["websocket"],
+        // Called before every connection attempt, so a new token is picked up
+        auth: (cb) => {
+            try {
+                cb({ token: readProxyToken() });
+            } catch (e) {
+                console.error(`Cannot read the proxy token at ${TOKEN_PATH}:`, e);
+                cb({});
+            }
+        },
     });
 
     socket.on("connect", () => {

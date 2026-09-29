@@ -6,6 +6,15 @@ const csInterface = new CSInterface();
 const APPLICATION = "illustrator";
 const PROXY_URL = "http://localhost:3002";
 
+// The proxy's shared secret. The proxy creates this file on its first start.
+// Never log the token itself.
+const TOKEN_PATH = require("path").join(
+    require("os").homedir(), ".config", "adb-mcp", "token");
+
+function readProxyToken() {
+    return require("fs").readFileSync(TOKEN_PATH, "utf8").trim();
+}
+
 
 let socket = null;
 
@@ -69,7 +78,16 @@ function connectToServer() {
     log(`Connecting to ${PROXY_URL}...`);
     
     socket = io(PROXY_URL, {
-        transports: ["websocket", "polling"],
+        transports: ["websocket"],
+        // Called before every connection attempt, so a new token is picked up
+        auth: (cb) => {
+            try {
+                cb({ token: readProxyToken() });
+            } catch (e) {
+                log(`Cannot read the proxy token at ${TOKEN_PATH}: ${e.message}`);
+                cb({});
+            }
+        },
     });
 
     socket.on("connect", () => {
@@ -91,6 +109,9 @@ function connectToServer() {
     socket.on("connect_error", (error) => {
         updateStatus(false);
         log(`Connection error: ${error.message}`);
+        if (error.message === "unauthorized") {
+            log(`The proxy refused this panel's token (${TOKEN_PATH}). Click Connect to retry.`);
+        }
     });
 
     socket.on("disconnect", (reason) => {

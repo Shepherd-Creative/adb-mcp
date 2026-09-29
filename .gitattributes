@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Vendored files are pinned by hash (cep/VENDORED.md): never rewrite their bytes
+/cep/*/lib/socket.io.min.js -text

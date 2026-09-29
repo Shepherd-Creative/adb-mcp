@@ -34,6 +34,14 @@ const {
 const APPLICATION = "indesign";
 const PROXY_URL = "http://localhost:3002";
 
+// The proxy's shared secret. The proxy creates this file on its first start.
+// Never log the token itself.
+const TOKEN_PATH = `${require("os").homedir()}/.config/adb-mcp/token`;
+
+function readProxyToken() {
+    return require("fs").readFileSync(TOKEN_PATH, { encoding: "utf-8" }).trim();
+}
+
 let socket = null;
 
 const onCommandPacket = async (packet) => {
@@ -76,7 +84,18 @@ function connectToServer() {
           };
     console.log(isWindows);
     console.log(socketOptions);
-    socket = io(PROXY_URL, socketOptions);
+    socket = io(PROXY_URL, {
+        ...socketOptions,
+        // Called before every connection attempt, so a new token is picked up
+        auth: (cb) => {
+            try {
+                cb({ token: readProxyToken() });
+            } catch (e) {
+                console.error(`Cannot read the proxy token at ${TOKEN_PATH}:`, e);
+                cb({});
+            }
+        },
+    });
 
     socket.on("connect", () => {
         updateButton();

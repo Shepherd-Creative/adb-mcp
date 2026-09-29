@@ -5,7 +5,8 @@
   "main": "proxy.js",
   "bin": "proxy.js",
   "scripts": {
-    "build": "pkg ."
+    "build": "pkg .",
+    "test": "node --test \"test/*.test.js\""
   },
   "author": "Mike Chambers",
   "license": "ISC",

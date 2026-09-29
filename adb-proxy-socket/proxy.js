@@ -26,11 +26,51 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
+const {
+    TOKEN_PATH,
+    isOriginAllowed,
+    loadOrCreateToken,
+    tokenMatches,
+} = require("./auth");
+
+let token;
+try {
+    const loaded = loadOrCreateToken(TOKEN_PATH);
+    token = loaded.token;
+    console.log(
+        `${loaded.created ? "Created" : "Using"} the proxy token at ${TOKEN_PATH}`
+    );
+} catch (e) {
+    console.error(`Cannot use the proxy token: ${e.message}`);
+    process.exit(1);
+}
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-    transports: ["websocket", "polling"],
+    // WebSocket only: a browser always sends an Origin header on a WebSocket
+    // handshake, so a handshake without one does not come from a web page.
+    transports: ["websocket"],
     maxHttpBufferSize: 50 * 1024 * 1024,
+    allowRequest: (req, callback) => {
+        const origin = req.headers.origin;
+        if (isOriginAllowed(origin)) {
+            callback(null, true);
+            return;
+        }
+        console.log(`Refused a connection from Origin ${JSON.stringify(origin)}`);
+        callback("origin not allowed", false);
+    },
+});
+
+// Every client must send the shared token in its socket.io auth payload.
+io.use((socket, next) => {
+    if (tokenMatches(token, socket.handshake.auth.token)) {
+        next();
+        return;
+    }
+    console.log(`Refused ${socket.id}: missing or wrong token`);
+    next(new Error("unauthorized"));
 });
 
 const PORT = 3002;

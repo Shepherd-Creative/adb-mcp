@@ -24,6 +24,8 @@ import socketio
 import time
 import threading
 import json
+import os
+import re
 from queue import Queue
 import logger
 
@@ -31,6 +33,22 @@ import logger
 proxy_url = None
 proxy_timeout = None
 application = None
+
+# The proxy's shared secret. The proxy creates this file on its first start.
+# Never log the token itself.
+TOKEN_PATH = os.path.join(os.path.expanduser("~"), ".config", "adb-mcp", "token")
+
+def read_token():
+    """Read the proxy token, raising a RuntimeError that names the file but
+    never its contents."""
+    try:
+        with open(TOKEN_PATH, encoding="utf-8") as fh:
+            token = fh.read().strip()
+    except OSError as e:
+        raise RuntimeError(f"Error: Could not connect to {application} command proxy server: cannot read the proxy token at {TOKEN_PATH} ({e.strerror}). Start the proxy once to create it.")
+    if not re.fullmatch(r"[0-9a-f]{64}", token):
+        raise RuntimeError(f"Error: Could not connect to {application} command proxy server: {TOKEN_PATH} does not hold a valid token. Delete it and restart the proxy to create a new one.")
+    return token
 
 def send_message_blocking(command, timeout=None):
     """
@@ -54,14 +72,18 @@ def send_message_blocking(command, timeout=None):
     
     # Use provided timeout or default
     wait_timeout = timeout if timeout is not None else proxy_timeout
-    
+
+    # Read on every call, so a new token is picked up without a restart
+    token = read_token()
+
     # Create a standard (non-async) SocketIO client with WebSocket transport only
     sio = socketio.Client(logger=False)
-    
+
     # Use a queue to get the response from the event handler
     response_queue = Queue()
-    
-    connection_failed = [False]         
+
+    connection_failed = [False]
+    token_refused = [False]
 
     @sio.event
     def connect():
@@ -92,13 +114,15 @@ def send_message_blocking(command, timeout=None):
     @sio.event
     def connect_error(error):
         logger.log(f"Connection error: {error}")
+        if isinstance(error, dict) and error.get("message") == "unauthorized":
+            token_refused[0] = True
         connection_failed[0] = True
         response_queue.put(None)
-    
+
     # Connect in a separate thread to avoid blocking the main thread during connection
     def connect_and_wait():
         try:
-            sio.connect(proxy_url, transports=['websocket'])
+            sio.connect(proxy_url, transports=['websocket'], auth={'token': token})
             # Keep the client running until disconnect is called
             sio.wait()
         except Exception as e:
@@ -118,6 +142,9 @@ def send_message_blocking(command, timeout=None):
         # Wait for a response or timeout
         logger.log("waiting for response...")
         response = response_queue.get(timeout=wait_timeout)
+
+        if token_refused[0]:
+            raise RuntimeError(f"Error: The {application} command proxy server at {proxy_url} refused this client's token. The token is read from {TOKEN_PATH}; check that the proxy was started with that file.")
 
         if connection_failed[0]:
             raise RuntimeError(f"Error: Could not connect to {application} command proxy server. Make sure that the proxy server is running listening on the correct url {proxy_url}.")
@@ -139,7 +166,11 @@ def send_message_blocking(command, timeout=None):
         logger.log(f"Error waiting for response: {e}")
         if sio.connected:
             sio.disconnect()
-  
+
+        # A refused token is not a timeout: keep its own message
+        if token_refused[0]:
+            raise
+
         raise RuntimeError(f"Error: Could not connect to {application}. Connection Timed Out. Make sure that {application} is running and that the MCP Plugin is connected. Original error: {e}")
     finally:
         # Make sure client is disconnected
