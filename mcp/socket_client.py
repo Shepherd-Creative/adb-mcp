@@ -47,7 +47,7 @@ def read_token():
     except OSError as e:
         raise RuntimeError(f"Error: Could not connect to {application} command proxy server: cannot read the proxy token at {TOKEN_PATH} ({e.strerror}). Start the proxy once to create it.")
     if not re.fullmatch(r"[0-9a-f]{64}", token):
-        raise RuntimeError(f"Error: Could not connect to {application} command proxy server: {TOKEN_PATH} does not hold a valid token. Delete it and restart the proxy to create a new one.")
+        raise RuntimeError(f"Error: Could not connect to {application} command proxy server: {TOKEN_PATH} does not hold a valid proxy token. Delete it and restart the proxy to create a new one.")
     return token
 
 def send_message_blocking(command, timeout=None):
@@ -87,7 +87,9 @@ def send_message_blocking(command, timeout=None):
 
     @sio.event
     def connect():
-        logger.log(f"Connected to server with session ID: {sio.sid}")
+        # get_sid() is the socket.io id the proxy logs; sio.sid is the engine.io
+        # session id, which must stay private
+        logger.log(f"Connected to server with socket ID: {sio.get_sid()}")
         
         # Send the command
         logger.log(f"Sending message to {application}: {command}")
@@ -144,7 +146,7 @@ def send_message_blocking(command, timeout=None):
         response = response_queue.get(timeout=wait_timeout)
 
         if token_refused[0]:
-            raise RuntimeError(f"Error: The {application} command proxy server at {proxy_url} refused this client's token. The token is read from {TOKEN_PATH}; check that the proxy was started with that file.")
+            raise RuntimeError(f"Error: The {application} command proxy server at {proxy_url} refused this client's proxy token, read from {TOKEN_PATH}. Check that the proxy was started with that file.")
 
         if connection_failed[0]:
             raise RuntimeError(f"Error: Could not connect to {application} command proxy server. Make sure that the proxy server is running listening on the correct url {proxy_url}.")

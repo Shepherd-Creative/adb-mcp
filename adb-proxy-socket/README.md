@@ -4,8 +4,9 @@ The proxy listens on `127.0.0.1:3002` only, and every client must present a
 shared token:
 
 - On first start the proxy creates `~/.config/adb-mcp/token` (directory 0700,
-  file 0600). It refuses to start if that file is open to other users, is a
-  symlink or holds no valid token.
+  file 0600). It refuses to start if the directory is writable by other
+  users, or if the file is open to other users, is a symlink or holds no
+  valid token. On Windows the owner and mode checks do not apply.
 - Clients read the file themselves and send it in the socket.io `auth`
   payload: `mcp/socket_client.py` and the panels in `cep/` and `uxp/`.
   Nothing prints it.
@@ -14,7 +15,23 @@ shared token:
   that was refused needs a click on Connect.
 - WebSocket handshakes from a browser Origin are refused. Allowed: no Origin
   (non-browser clients), `file://` (CEP panels) and `http://localhost:3002`
-  (python-socketio). The proxy accepts WebSocket only, no polling.
+  (python-socketio: connect to `localhost`, because `127.0.0.1` sends an
+  Origin the proxy refuses). The proxy accepts WebSocket only, no polling.
+- A request that carries an engine.io session id is refused. The proxy never
+  upgrades a transport, and such a request would join an existing session
+  without the token or an allowed Origin.
+
+Two things can undo this:
+
+- Debug output. With `DEBUG` set (for example `DEBUG=socket.io*`), socket.io
+  logs whole packets, including each client's token; the proxy prints a
+  warning at start when `DEBUG` is set. The same goes for
+  `engineio_logger=True` in python-socketio and for `localStorage.debug` in
+  the UXP plugins, which load an unminified socket.io.
+- A DevTools port. The CEP panels run Node.js and open no DevTools port. To
+  debug one, add a `.debug` file next to its `index.html` and delete it
+  afterwards: with PlayerDebugMode on, anything on this Mac can use that
+  port to run code in the panel, token or not.
 
 ### Tests
 

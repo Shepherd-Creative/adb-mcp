@@ -28,6 +28,7 @@ const http = require("http");
 const { Server } = require("socket.io");
 const {
     TOKEN_PATH,
+    debugOutputWarning,
     isOriginAllowed,
     loadOrCreateToken,
     tokenMatches,
@@ -43,6 +44,11 @@ try {
 } catch (e) {
     console.error(`Cannot use the proxy token: ${e.message}`);
     process.exit(1);
+}
+
+const debugWarning = debugOutputWarning();
+if (debugWarning) {
+    console.warn(debugWarning);
 }
 
 const app = express();
@@ -61,6 +67,20 @@ const io = new Server(server, {
         console.log(`Refused a connection from Origin ${JSON.stringify(origin)}`);
         callback("origin not allowed", false);
     },
+});
+
+// engine.io runs allowRequest only for handshakes without a session id. A
+// request that carries one is a transport upgrade, and would take over that
+// session without the token or an allowed Origin. This proxy is WebSocket
+// only, so it never upgrades and no client needs to send one. Engine
+// middleware runs on every request, before that check.
+io.engine.use((req, res, next) => {
+    if (new URL(req.url, "http://localhost").searchParams.has("sid")) {
+        console.log("Refused a request that carried a session id");
+        next(new Error("session id not accepted"));
+        return;
+    }
+    next();
 });
 
 // Every client must send the shared token in its socket.io auth payload.

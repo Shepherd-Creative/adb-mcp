@@ -25,30 +25,73 @@ function isOriginAllowed(origin) {
     return origin === undefined || ALLOWED_ORIGINS.has(origin);
 }
 
+// O_NOFOLLOW refuses a symlink, so the checks below run on the file itself.
+// Windows has no O_NOFOLLOW and no POSIX owner or mode: there the proxy
+// relies on the home directory's own permissions.
+function openToken(tokenPath) {
+    return fs.openSync(tokenPath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+}
+
+// Another user who could write to the directory could swap the token file.
+function checkDirectory(dir) {
+    const st = fs.statSync(dir);
+    if (!st.isDirectory()) {
+        throw new Error(`${dir} is not a directory`);
+    }
+    if (process.platform === "win32") return;
+    if (st.uid !== process.getuid()) {
+        throw new Error(`${dir} belongs to another user`);
+    }
+    if (st.mode & 0o022) {
+        const mode = (st.mode & 0o777).toString(8);
+        throw new Error(`${dir} is writable by other users (mode ${mode}); run chmod 700 on it`);
+    }
+}
+
+// Writes a new token to a temporary file, then links it into place. link()
+// fails if the token file exists, so an existing token is never replaced, and
+// the token file only ever appears complete: a crash, or a second proxy
+// starting at the same moment, cannot leave an empty one behind. Returns
+// false when another process created the file first.
+function createTokenFile(tokenPath) {
+    const tmp = `${tokenPath}.${crypto.randomBytes(8).toString("hex")}.tmp`;
+    const data = crypto.randomBytes(32).toString("hex") + "\n";
+    const fd = fs.openSync(tmp, "wx", 0o600);
+    try {
+        if (fs.writeSync(fd, data) !== Buffer.byteLength(data)) {
+            throw new Error(`could not write ${tmp}`);
+        }
+        fs.fsyncSync(fd);
+    } finally {
+        fs.closeSync(fd);
+    }
+    try {
+        fs.linkSync(tmp, tokenPath);
+        return true;
+    } catch (e) {
+        if (e.code === "EEXIST") return false;
+        throw e;
+    } finally {
+        fs.unlinkSync(tmp);
+    }
+}
+
 // Returns { token, created }. Creates the token file if it does not exist, and
 // refuses one that another user could have read or replaced.
 function loadOrCreateToken(tokenPath = TOKEN_PATH) {
-    fs.mkdirSync(path.dirname(tokenPath), { recursive: true, mode: 0o700 });
+    const dir = path.dirname(tokenPath);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    checkDirectory(dir);
 
     let created = false;
+    let fd;
     try {
-        // "wx" fails if the file exists, so an existing token is never replaced.
-        const fd = fs.openSync(tokenPath, "wx", 0o600);
-        try {
-            fs.writeSync(fd, crypto.randomBytes(32).toString("hex") + "\n");
-        } finally {
-            fs.closeSync(fd);
-        }
-        created = true;
+        fd = openToken(tokenPath);
     } catch (e) {
-        if (e.code !== "EEXIST") throw e;
+        if (e.code !== "ENOENT") throw e;
+        created = createTokenFile(tokenPath);
+        fd = openToken(tokenPath);
     }
-
-    // O_NOFOLLOW refuses a symlink, and the checks run on the open file itself.
-    const fd = fs.openSync(
-        tokenPath,
-        fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0)
-    );
     try {
         const st = fs.fstatSync(fd);
         if (!st.isFile()) {
@@ -87,9 +130,21 @@ function tokenMatches(expected, given) {
     return crypto.timingSafeEqual(a, b);
 }
 
+// socket.io's debug output logs whole packets, and a client's CONNECT packet
+// carries its token (socket.io-parser logs "decoded ... as ...").
+function debugOutputWarning(env = process.env) {
+    if (!env.DEBUG) return null;
+    return (
+        "DEBUG is set: socket.io debug output can include each client's token. " +
+        "Do not share this output, and unset DEBUG when you are done."
+    );
+}
+
 module.exports = {
     ALLOWED_ORIGINS,
     TOKEN_PATH,
+    createTokenFile,
+    debugOutputWarning,
     isOriginAllowed,
     loadOrCreateToken,
     tokenMatches,

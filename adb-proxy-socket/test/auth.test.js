@@ -5,6 +5,8 @@ const path = require("node:path");
 const { test } = require("node:test");
 
 const {
+    createTokenFile,
+    debugOutputWarning,
     isOriginAllowed,
     loadOrCreateToken,
     tokenMatches,
@@ -55,7 +57,7 @@ test("refuses a symlink in place of the token file", () => {
     const real = tempTokenPath();
     loadOrCreateToken(real);
     const link = tempTokenPath();
-    fs.mkdirSync(path.dirname(link), { recursive: true });
+    fs.mkdirSync(path.dirname(link), { recursive: true, mode: 0o700 });
     fs.symlinkSync(real, link);
 
     assert.throws(() => loadOrCreateToken(link), { code: "ELOOP" });
@@ -63,13 +65,48 @@ test("refuses a symlink in place of the token file", () => {
 
 test("refuses malformed content without echoing it", () => {
     const tokenPath = tempTokenPath();
-    fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
+    fs.mkdirSync(path.dirname(tokenPath), { recursive: true, mode: 0o700 });
     fs.writeFileSync(tokenPath, "not-a-token-XYZZY\n", { mode: 0o600 });
 
     assert.throws(
         () => loadOrCreateToken(tokenPath),
         (e) => /does not hold a valid token/.test(e.message) && !e.message.includes("XYZZY")
     );
+});
+
+test("refuses a directory other users can write to, and writes nothing into it", () => {
+    const tokenPath = tempTokenPath();
+    fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
+    fs.chmodSync(path.dirname(tokenPath), 0o777);
+
+    assert.throws(() => loadOrCreateToken(tokenPath), /writable by other users \(mode 777\)/);
+    assert.equal(fs.existsSync(tokenPath), false, "a token was written into that directory");
+});
+
+test("creating a token never replaces a file another process wrote first", () => {
+    const tokenPath = tempTokenPath();
+    fs.mkdirSync(path.dirname(tokenPath), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(tokenPath, "c".repeat(64) + "\n", { mode: 0o600 });
+
+    assert.equal(createTokenFile(tokenPath), false);
+    assert.equal(fs.readFileSync(tokenPath, "utf8"), "c".repeat(64) + "\n");
+    assert.deepEqual(fs.readdirSync(path.dirname(tokenPath)), ["token"], "a temporary file was left behind");
+});
+
+test("a new token file appears complete, 0600, with no temporary file left", () => {
+    const tokenPath = tempTokenPath();
+    fs.mkdirSync(path.dirname(tokenPath), { recursive: true, mode: 0o700 });
+
+    assert.equal(createTokenFile(tokenPath), true);
+    assert.match(fs.readFileSync(tokenPath, "utf8"), /^[0-9a-f]{64}\n$/);
+    assert.equal(fs.statSync(tokenPath).mode & 0o777, 0o600);
+    assert.deepEqual(fs.readdirSync(path.dirname(tokenPath)), ["token"]);
+});
+
+test("warns when DEBUG is set, since socket.io debug output can include tokens", () => {
+    assert.equal(debugOutputWarning({}), null);
+    assert.equal(debugOutputWarning({ DEBUG: "" }), null);
+    assert.match(debugOutputWarning({ DEBUG: "socket.io*" }), /^DEBUG is set: .*token/);
 });
 
 test("tokenMatches accepts only the exact token", () => {

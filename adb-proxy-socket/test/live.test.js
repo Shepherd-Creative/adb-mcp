@@ -129,13 +129,17 @@ test("a wrong path is refused whatever the Origin, so it cannot stand in for the
 });
 
 test("the polling transport is refused", { skip: SKIP }, async () => {
-    const status = await new Promise((resolve, reject) => {
+    const { status, body } = await new Promise((resolve, reject) => {
         http.get(`${URL}/socket.io/?EIO=4&transport=polling`, (res) => {
-            res.resume();
-            resolve(res.statusCode);
+            let body = "";
+            res.setEncoding("utf8");
+            res.on("data", (chunk) => (body += chunk));
+            res.on("end", () => resolve({ status: res.statusCode, body }));
         }).on("error", reject);
     });
     assert.equal(status, 400);
+    // engine.io's "Transport unknown" (code 0), not a refusal for another reason
+    assert.match(body, /"code":0,/, body);
 });
 
 test("no token, a wrong token and a non-string token are refused", { skip: SKIP }, async () => {
@@ -148,12 +152,17 @@ test("no token, a wrong token and a non-string token are refused", { skip: SKIP 
 });
 
 test("the right token from a web page Origin is still refused", { skip: SKIP }, async () => {
+    const refusals = () =>
+        (output.match(/Refused a connection from Origin "https:\/\/evil\.example"/g) || []).length;
+    const before = refusals();
     const r = await connect({
         auth: { token: readToken() },
         extraHeaders: { Origin: "https://evil.example" },
     });
     assert.equal(r.connected, false);
     assert.notEqual(r.error, "unauthorized", "the Origin check should refuse before the token check");
+    // The proxy logged this refusal, so a dead proxy cannot pass this test
+    await waitFor(() => refusals() === before + 1, 2000, "the proxy to log this Origin refusal");
 });
 
 test("a client that ignores the refusal and sends a command anyway reaches no app", { skip: SKIP }, async () => {
@@ -205,6 +214,76 @@ test("a client that ignores the refusal and sends a command anyway reaches no ap
     }
 });
 
+// Tries to take over an engine.io session the way engine.io upgrades a
+// transport: a WebSocket handshake that carries the session's id, the probe
+// exchange, then an event. Resolves to the handshake's HTTP status (101 when
+// accepted) and the frames received.
+function attemptTakeover(sid, origin) {
+    return new Promise((resolve) => {
+        const ws = new WebSocket(
+            `ws://localhost:${PORT}${ENGINE_PATH}&sid=${encodeURIComponent(sid)}`,
+            origin === undefined ? {} : { origin }
+        );
+        const frames = [];
+        let status = null;
+        ws.on("upgrade", (res) => (status = res.statusCode));
+        ws.on("unexpected-response", (req, res) => {
+            status = res.statusCode;
+            res.resume();
+        });
+        ws.on("open", () => ws.send("2probe"));
+        ws.on("message", (data) => {
+            const frame = data.toString();
+            frames.push(frame);
+            if (frame === "3probe") {
+                ws.send("5");
+                ws.send(
+                    "42" +
+                        JSON.stringify([
+                            "command_packet",
+                            { application: PROBE_APP, command: { action: "takeover" } },
+                        ])
+                );
+            }
+        });
+        ws.on("error", () => {});
+        setTimeout(() => {
+            ws.terminate();
+            resolve({ status, frames });
+        }, 700);
+    });
+}
+
+test("a handshake that carries a session id is refused, so it cannot take over a session", { skip: SKIP }, async () => {
+    const { app, received } = await registerProbeApp();
+    const victim = await connect({ auth: { token: readToken() } });
+    assert.equal(victim.connected, true, victim.error);
+    try {
+        const sid = victim.socket.io.engine.id;
+        assert.ok(typeof sid === "string" && sid.length >= 16, "harness bug: no engine.io session id");
+
+        // engine.io runs allowRequest only for handshakes without a session
+        // id, so without a check of its own the proxy would let this page
+        // drive the app as the victim, with neither the token nor an allowed
+        // Origin.
+        const takeover = await attemptTakeover(sid, "https://evil.example");
+        await sleep(200);
+        assert.equal(received.length, 0, `a command got through on a taken-over session: ${JSON.stringify(takeover)}`);
+        assert.equal(takeover.status, 400, JSON.stringify(takeover));
+
+        // Refused whatever the Origin: a WebSocket-only server never upgrades,
+        // so no client of this proxy sends a session id.
+        for (const origin of ["file://", "http://localhost:3002", undefined]) {
+            const r = await probeHandshake({ origin, path: `${ENGINE_PATH}&sid=${encodeURIComponent(sid)}` });
+            assert.equal(r.status, 400, `Origin ${JSON.stringify(origin)} with a live session id: ${JSON.stringify(r)}`);
+        }
+        assert.equal(victim.socket.connected, true, "the victim's session was disturbed");
+    } finally {
+        victim.socket.close();
+        app.close();
+    }
+});
+
 test("the right token connects and relays a command round trip", { skip: SKIP }, async () => {
     const { app } = await registerProbeApp();
     app.on("command_packet", (packet) => {
@@ -235,6 +314,7 @@ test("the token never appears in the proxy's output", { skip: SKIP }, async () =
     // Non-vacuity: the output holds the lines the tests above produced.
     assert.match(output, /Refused a connection from Origin "https:\/\/evil\.example"/);
     assert.match(output, /missing or wrong token/);
+    assert.match(output, /Refused a request that carried a session id/);
     assert.match(output, new RegExp(`registered for application: ${PROBE_APP}`));
     assert.equal(output.includes(token), false, "the proxy printed the token");
 });
