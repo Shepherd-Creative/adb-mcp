@@ -119,6 +119,8 @@ test("tokenMatches accepts only the exact token", () => {
     assert.equal(tokenMatches(token, ""), false);
     for (const notAString of [undefined, null, 42, {}, [token], { token }]) {
         assert.equal(tokenMatches(token, notAString), false);
+        // No expected token yet (the proxy is starting): refuse, never throw
+        assert.equal(tokenMatches(notAString, token), false);
     }
 });
 

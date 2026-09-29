@@ -80,12 +80,13 @@ function connectToServer() {
         transports: ["websocket"],
         // Called before every connection attempt, so a new token is picked up
         auth: (cb) => {
+            let auth = {};
             try {
-                cb({ token: readProxyToken() });
+                auth = { token: readProxyToken() };
             } catch (e) {
                 log(`Cannot read the proxy token at ${TOKEN_PATH}: ${e.message}`);
-                cb({});
             }
+            cb(auth);
         },
     });
 

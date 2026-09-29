@@ -1,7 +1,11 @@
 ### Security
 
-The proxy listens on `127.0.0.1:3002` only, and every client must present a
-shared token:
+The proxy listens on loopback only, on both `127.0.0.1:3002` and
+`[::1]:3002`, and every client must present a shared token. It holds both
+addresses because clients dial `localhost`, which resolves to `::1` first on
+macOS: another program listening on `[::1]:3002` would receive their tokens.
+It refuses to start if either address is taken, and it does not serve the
+socket.io client script.
 
 - On first start the proxy creates `~/.config/adb-mcp/token` (directory 0700,
   file 0600). It refuses to start if the directory is writable by other
@@ -21,7 +25,11 @@ shared token:
   upgrades a transport, and such a request would join an existing session
   without the token or an allowed Origin.
 
-Two things can undo this:
+Three things can undo this:
+
+- A stopped proxy. While it is stopped, any program that takes port 3002
+  receives the token from every client that connects, panels retrying in the
+  background included. Rotate the token if that may have happened.
 
 - Debug output. With `DEBUG` set (for example `DEBUG=socket.io*`), socket.io
   logs whole packets, including each client's token; the proxy prints a

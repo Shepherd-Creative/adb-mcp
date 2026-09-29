@@ -49,6 +49,14 @@ for (const panel of PANELS) {
         }
     });
 
+    test(`${panel}: no .debug file opens a DevTools port`, () => {
+        assert.equal(
+            fs.existsSync(path.join(CEP_DIR, panel, ".debug")),
+            false,
+            "with PlayerDebugMode on, a .debug file opens a DevTools port: delete it when you are done debugging"
+        );
+    });
+
     test(`${panel}: the manifest opens no DevTools port`, () => {
         const manifest = fs.readFileSync(path.join(CEP_DIR, panel, "CSXS", "manifest.xml"), "utf8");
         assert.match(manifest, /<Parameter>--enable-nodejs<\/Parameter>/, "manifest not recognised");

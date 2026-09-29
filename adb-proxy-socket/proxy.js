@@ -25,6 +25,7 @@
 
 const express = require("express");
 const http = require("http");
+const net = require("net");
 const { Server } = require("socket.io");
 const {
     TOKEN_PATH,
@@ -34,22 +35,9 @@ const {
     tokenMatches,
 } = require("./auth");
 
-let token;
-try {
-    const loaded = loadOrCreateToken(TOKEN_PATH);
-    token = loaded.token;
-    console.log(
-        `${loaded.created ? "Created" : "Using"} the proxy token at ${TOKEN_PATH}`
-    );
-} catch (e) {
-    console.error(`Cannot use the proxy token: ${e.message}`);
-    process.exit(1);
-}
-
-const debugWarning = debugOutputWarning();
-if (debugWarning) {
-    console.warn(debugWarning);
-}
+// Loaded only once the proxy holds its port (see start() at the end of this
+// file), so a proxy that cannot listen never creates or changes a token.
+let token = null;
 
 const app = express();
 const server = http.createServer(app);
@@ -57,6 +45,9 @@ const io = new Server(server, {
     // WebSocket only: a browser always sends an Origin header on a WebSocket
     // handshake, so a handshake without one does not come from a web page.
     transports: ["websocket"],
+    // The panels ship their own socket.io client. Serving it would let any
+    // web page load it with a script tag and learn that the proxy is running.
+    serveClient: false,
     maxHttpBufferSize: 50 * 1024 * 1024,
     allowRequest: (req, callback) => {
         const origin = req.headers.origin;
@@ -75,6 +66,13 @@ const io = new Server(server, {
 // only, so it never upgrades and no client needs to send one. Engine
 // middleware runs on every request, before that check.
 io.engine.use((req, res, next) => {
+    // Defensive: start() runs from the listen callbacks, so no request should
+    // arrive before the token is loaded. One that did is refused here, which
+    // clients retry, rather than by the token check, which is final.
+    if (token === null) {
+        next(new Error("not ready"));
+        return;
+    }
     if (new URL(req.url, "http://localhost").searchParams.has("sid")) {
         console.log("Refused a request that carried a session id");
         next(new Error("session id not accepted"));
@@ -195,8 +193,61 @@ function sendToApplication(packet) {
 // Example: Use this function elsewhere in your code
 // sendToApplication('photoshop', { message: 'Update available' });
 
-server.listen(PORT, "127.0.0.1", () => {
+function fail(message) {
+    console.error(message);
+    process.exit(1);
+}
+
+// Pipes a connection on [::1]:3002 to the IPv4 listener, where every check
+// applies as usual.
+function forwardToIPv4(client) {
+    const upstream = net.connect(PORT, "127.0.0.1");
+    const close = () => {
+        client.destroy();
+        upstream.destroy();
+    };
+    for (const end of [client, upstream]) {
+        end.on("error", close);
+        end.on("close", close);
+    }
+    client.pipe(upstream).pipe(client);
+}
+
+function start() {
+    try {
+        const loaded = loadOrCreateToken(TOKEN_PATH);
+        token = loaded.token;
+        console.log(
+            `${loaded.created ? "Created" : "Using"} the proxy token at ${TOKEN_PATH}`
+        );
+    } catch (e) {
+        fail(`Cannot use the proxy token: ${e.message}`);
+    }
+    const debugWarning = debugOutputWarning();
+    if (debugWarning) {
+        console.warn(debugWarning);
+    }
     console.log(
         `adb-mcp Command proxy server running on ws://localhost:${PORT}`
     );
+}
+
+// Clients dial "localhost", which resolves to ::1 before 127.0.0.1 on macOS.
+// The proxy holds [::1]:3002 as well, so no other process can listen there
+// and collect client tokens, and it refuses to start if either address is
+// taken. A machine with no IPv6 loopback has no ::1 for anyone to take.
+server.on("error", (e) => fail(`Cannot listen on 127.0.0.1:${PORT}: ${e.message}`));
+server.listen(PORT, "127.0.0.1", () => {
+    const ipv6 = net.createServer(forwardToIPv4);
+    ipv6.on("error", (e) => {
+        if (e.code === "EADDRNOTAVAIL" || e.code === "EAFNOSUPPORT") {
+            start();
+            return;
+        }
+        fail(
+            `Cannot listen on [::1]:${PORT}: ${e.message}. Another program there ` +
+                `would receive client tokens: stop it, then start the proxy.`
+        );
+    });
+    ipv6.listen(PORT, "::1", start);
 });

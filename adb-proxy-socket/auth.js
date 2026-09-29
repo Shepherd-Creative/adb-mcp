@@ -124,7 +124,7 @@ function loadOrCreateToken(tokenPath = TOKEN_PATH) {
 
 // Constant-time comparison. Hashing first makes both sides the same length.
 function tokenMatches(expected, given) {
-    if (typeof given !== "string") return false;
+    if (typeof expected !== "string" || typeof given !== "string") return false;
     const a = crypto.createHash("sha256").update(given).digest();
     const b = crypto.createHash("sha256").update(expected).digest();
     return crypto.timingSafeEqual(a, b);

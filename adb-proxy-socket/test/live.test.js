@@ -9,6 +9,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
+const os = require("node:os");
 const path = require("node:path");
 const { after, before, test } = require("node:test");
 const { io } = require("socket.io-client");
@@ -26,9 +27,9 @@ const PROBE_APP = "__adb_probe__";
 let proxy = null;
 let output = "";
 
-function portInUse(port) {
+function portInUse(port, host) {
     return new Promise((resolve) => {
-        const socket = net.connect({ host: "127.0.0.1", port });
+        const socket = net.connect({ host, port });
         socket.once("connect", () => {
             socket.destroy();
             resolve(true);
@@ -54,10 +55,19 @@ function waitFor(predicate, timeoutMs, what) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Resolves to { connected: true, socket } or { connected: false, error }.
-function connect(options = {}) {
+// Whether this machine has an IPv6 loopback address to listen on.
+function ipv6LoopbackAvailable() {
     return new Promise((resolve) => {
-        const socket = io(URL, {
+        const probe = net.createServer();
+        probe.once("error", () => resolve(false));
+        probe.listen(0, "::1", () => probe.close(() => resolve(true)));
+    });
+}
+
+// Resolves to { connected: true, socket } or { connected: false, error }.
+function connect(options = {}, url = URL) {
+    return new Promise((resolve) => {
+        const socket = io(url, {
             transports: ["websocket"],
             reconnection: false,
             forceNew: true,
@@ -91,8 +101,12 @@ async function registerProbeApp() {
 
 before(async () => {
     if (!LIVE) return;
-    if (await portInUse(PORT)) {
-        throw new Error(`port ${PORT} is in use: stop the running proxy before the live suite`);
+    // Both loopback addresses: clients dial "localhost", which may resolve to
+    // either, and a listener on one of them would receive the suite's token.
+    for (const host of ["127.0.0.1", "::1"]) {
+        if (await portInUse(PORT, host)) {
+            throw new Error(`port ${PORT} is in use on ${host}: stop whatever holds it before the live suite`);
+        }
     }
     proxy = spawn(process.execPath, ["proxy.js"], {
         cwd: path.join(__dirname, ".."),
@@ -305,6 +319,77 @@ test("the right token connects and relays a command round trip", { skip: SKIP },
         caller.socket.close();
         app.close();
     }
+});
+
+test("the proxy also holds [::1]:3002, so no other process can listen there for tokens", { skip: SKIP }, async (t) => {
+    if (!(await ipv6LoopbackAvailable())) {
+        t.skip("no IPv6 loopback on this machine");
+        return;
+    }
+    // Clients dial "localhost", which resolves to ::1 first on macOS: a
+    // process listening there would receive every client's token.
+    const outcome = await new Promise((resolve) => {
+        const squatter = net.createServer();
+        squatter.once("error", (e) => resolve(e.code));
+        squatter.listen(PORT, "::1", () => squatter.close(() => resolve("listening")));
+    });
+    assert.equal(outcome, "EADDRINUSE", "another process could listen on [::1]:3002 while the proxy runs");
+});
+
+test("through [::1] the proxy applies the same checks", { skip: SKIP }, async (t) => {
+    if (!(await ipv6LoopbackAvailable())) {
+        t.skip("no IPv6 loopback on this machine");
+        return;
+    }
+    const url6 = `http://[::1]:${PORT}`;
+    const noToken = await connect({}, url6);
+    assert.equal(noToken.connected, false);
+    assert.equal(noToken.error, "unauthorized");
+
+    const evil = await probeHandshake({ host: "::1", origin: "https://evil.example" });
+    assert.equal(evil.status, 400, JSON.stringify(evil));
+    assert.match(evil.body, /origin not allowed/);
+
+    const withToken = await connect({ auth: { token: readToken() } }, url6);
+    assert.equal(withToken.connected, true, withToken.error);
+    withToken.socket.close();
+});
+
+test("a second proxy that cannot listen exits before touching any token file", { skip: SKIP }, async () => {
+    // A HOME with no token in it: a proxy that wrote one before failing to
+    // listen would leave behind a token that no running proxy uses.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "adb-second-proxy-"));
+    try {
+        const second = spawn(process.execPath, ["proxy.js"], {
+            cwd: path.join(__dirname, ".."),
+            env: { ...process.env, HOME: home },
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+        let out = "";
+        second.stdout.on("data", (d) => (out += d));
+        second.stderr.on("data", (d) => (out += d));
+        const timer = setTimeout(() => second.kill("SIGKILL"), 10000);
+        const code = await new Promise((resolve) => second.once("exit", resolve));
+        clearTimeout(timer);
+        assert.equal(code, 1, out);
+        assert.match(out, /Cannot listen on 127\.0\.0\.1:3002/);
+        assert.equal(fs.existsSync(path.join(home, ".config")), false, "the second proxy created token files");
+    } finally {
+        fs.rmSync(home, { recursive: true, force: true });
+    }
+});
+
+test("the proxy does not serve the socket.io client script", { skip: SKIP }, async () => {
+    // A web page could load it with a script tag to learn the proxy is running.
+    const { status, body } = await new Promise((resolve, reject) => {
+        http.get(`${URL}/socket.io/socket.io.js`, (res) => {
+            let body = "";
+            res.setEncoding("utf8");
+            res.on("data", (chunk) => (body += chunk));
+            res.on("end", () => resolve({ status: res.statusCode, body }));
+        }).on("error", reject);
+    });
+    assert.notEqual(status, 200, `served ${body.length} bytes`);
 });
 
 test("the token never appears in the proxy's output", { skip: SKIP }, async () => {

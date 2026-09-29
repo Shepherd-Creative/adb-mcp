@@ -15,6 +15,7 @@ const ENGINE_PATH = "/socket.io/?EIO=4&transport=websocket";
 // response body), or to { status: null, error } when the server closed or timed
 // out without answering. `origin` undefined sends no Origin header at all.
 function probeHandshake({
+    host = "127.0.0.1",
     port = 3002,
     path = ENGINE_PATH,
     origin,
@@ -33,7 +34,7 @@ function probeHandshake({
         }
 
         const req = http.request({
-            host: "127.0.0.1",
+            host,
             port,
             path,
             method: "GET",

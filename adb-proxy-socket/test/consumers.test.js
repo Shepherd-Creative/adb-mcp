@@ -13,19 +13,24 @@ const vm = require("node:vm");
 const { TOKEN_PATH } = require("../auth");
 
 const ROOT = path.join(__dirname, "..", "..");
+// The CEP panels run Node.js, where os.homedir() always exists. The UXP
+// plugins work the path out lazily, inside the auth callback's try/catch, so a
+// host whose os module lacks homedir() still loads the plugin.
+const CEP_DECLARATION = /const TOKEN_PATH = ([\s\S]*?);\n/;
+const UXP_DECLARATION = /const proxyTokenPath = \(\) => ([\s\S]*?);\n/;
 const JS_CONSUMERS = [
-    "cep/com.mikechambers.ai/main.js",
-    "cep/com.mikechambers.ae/main.js",
-    "uxp/ps/main.js",
-    "uxp/id/main.js",
-    "uxp/pr/main.js",
+    ["cep/com.mikechambers.ai/main.js", CEP_DECLARATION],
+    ["cep/com.mikechambers.ae/main.js", CEP_DECLARATION],
+    ["uxp/ps/main.js", UXP_DECLARATION],
+    ["uxp/id/main.js", UXP_DECLARATION],
+    ["uxp/pr/main.js", UXP_DECLARATION],
 ];
 
-for (const file of JS_CONSUMERS) {
+for (const [file, declaration] of JS_CONSUMERS) {
     test(`${file} reads the token from the proxy's token path`, () => {
         const source = fs.readFileSync(path.join(ROOT, file), "utf8");
-        const m = source.match(/const TOKEN_PATH = ([\s\S]*?);\n/);
-        assert.ok(m, "no TOKEN_PATH in this file");
+        const m = source.match(declaration);
+        assert.ok(m, `no token path declared as ${declaration} in this file`);
         const modules = { os, path };
         const value = vm.runInNewContext(m[1], { require: (name) => modules[name], os });
         assert.equal(path.normalize(value), path.normalize(TOKEN_PATH));

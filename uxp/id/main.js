@@ -35,11 +35,13 @@ const APPLICATION = "indesign";
 const PROXY_URL = "http://localhost:3002";
 
 // The proxy's shared secret. The proxy creates this file on its first start.
-// Never log the token itself.
-const TOKEN_PATH = `${require("os").homedir()}/.config/adb-mcp/token`;
+// Never log the token itself. The path is worked out when the token is read,
+// inside the auth callback's try/catch, so a UXP host whose os module lacks
+// homedir() still loads the plugin and logs why it cannot connect.
+const proxyTokenPath = () => `${require("os").homedir()}/.config/adb-mcp/token`;
 
 function readProxyToken() {
-    return require("fs").readFileSync(TOKEN_PATH, { encoding: "utf-8" }).trim();
+    return require("fs").readFileSync(proxyTokenPath(), { encoding: "utf-8" }).trim();
 }
 
 let socket = null;
@@ -88,12 +90,13 @@ function connectToServer() {
         ...socketOptions,
         // Called before every connection attempt, so a new token is picked up
         auth: (cb) => {
+            let auth = {};
             try {
-                cb({ token: readProxyToken() });
+                auth = { token: readProxyToken() };
             } catch (e) {
-                console.error(`Cannot read the proxy token at ${TOKEN_PATH}:`, e);
-                cb({});
+                console.error("Cannot read the proxy token (~/.config/adb-mcp/token):", e);
             }
+            cb(auth);
         },
     });
 
